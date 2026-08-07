@@ -1,0 +1,29 @@
+listen_addresses = ['0.0.0.0:53']
+force_tcp = true
+tcp_only = true
+
+server_names = ['cloudflare', 'google']
+
+[static]
+  [static.'cloudflare']
+  stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGZsYXJlLmNvbQovZG5zLXF1ZXJ5'
+  
+  [static.'google']
+  stamp = 'sdns://AgUAAAAAAAAABzguOC44LjigHvYkz_9ea9O63fP92_3qVlRn43cpncfuZnUWbzAMwbkgdoAkR6AZkxo0EMYuMQdjLmpvbw'
+
+cache = true
+cache_size = 4096
+cache_min_ttl = 600
+cache_max_ttl = 86400
+
+log_level = 2
+log_file = '/var/log/dnscrypt-proxy/dnscrypt-proxy.log'
+
+timeout = 5000
+keepalive = 30
+
+bootstrap_resolvers = ['9.9.9.9:53', '8.8.8.8:53']
+
+[query_log]
+file = '/var/log/dnscrypt-proxy/query.log'
+format = 'tsv'
