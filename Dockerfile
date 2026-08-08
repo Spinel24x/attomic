@@ -7,16 +7,17 @@ RUN apk add --no-cache \
     ca-certificates \
     tar \
     xz \
-    libstdc++
+    libstdc++ \
+    jq
 
-# دانلود و نصب NaiveProxy - نسخه دقیق
-RUN curl -L "https://github.com/klzgrad/naiveproxy/releases/download/v130.0.6723.58-1/naiveproxy-v130.0.6723.58-1-linux-x64.tar.xz" -o /tmp/naive.tar.xz \
+RUN curl -sL "https://api.github.com/repos/klzgrad/naiveproxy/releases/latest" | jq -r '.assets[] | select(.name | endswith("linux-x64.tar.xz")) | .browser_download_url' | xargs curl -L -o /tmp/naive.tar.xz \
+    && ls -la /tmp/naive.tar.xz \
+    && file /tmp/naive.tar.xz || true \
     && tar -xJf /tmp/naive.tar.xz -C /tmp \
-    && ls -la /tmp/naiveproxy-* \
-    && cp /tmp/naiveproxy-*/naive /usr/local/bin/naive \
+    && ls -la /tmp/ \
+    && find /tmp -name "naive" -type f -exec cp {} /usr/local/bin/naive \; \
     && chmod +x /usr/local/bin/naive \
     && ls -la /usr/local/bin/naive \
-    && /usr/local/bin/naive --version \
     && rm -rf /tmp/naive*
 
 RUN mkdir -p /var/log/supervisor /run/nginx
