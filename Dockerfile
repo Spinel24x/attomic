@@ -13,11 +13,14 @@ RUN apt-get update && apt-get install -y \
 RUN wget https://github.com/i2p/i2p.i2p/releases/download/i2p-2.4.0/i2pinstall_2.4.0.jar \
     && mkdir -p /tmp/i2p \
     && cd /tmp/i2p \
-    && /usr/bin/unzip /i2pinstall_2.4.0.jar \
+    && unzip -o /i2pinstall_2.4.0.jar \
     && ls -la /tmp/i2p/ \
     && mkdir -p /i2p \
-    && cp -r /tmp/i2p/* /i2p/ \
-    && chmod +x /i2p/i2prouter 2>/dev/null || chmod +x /i2p/installer/lib/i2prouter 2>/dev/null || true \
+    && if [ -d "/tmp/i2p/i2p" ]; then cp -r /tmp/i2p/i2p/* /i2p/; else cp -r /tmp/i2p/* /i2p/; fi \
+    && ls -la /i2p/ \
+    && find /i2p -name "i2prouter" -type f \
+    && chmod +x /i2p/i2prouter 2>/dev/null || true \
+    && chmod +x /i2p/installer/lib/i2prouter 2>/dev/null || true \
     && rm /i2pinstall_2.4.0.jar \
     && rm -rf /tmp/i2p
 
