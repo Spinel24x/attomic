@@ -11,11 +11,49 @@ auth:
 masquerade:
   type: proxy
   proxy:
-    url: https://attomic-production.up.railway.app
+    url: https://speed.cloudflare.com
     rewriteHost: true
 
+# این کلید اصلی TCP mode هست
+transport:
+  type: tcp
+
+quic:
+  initStreamReceiveWindow: 16777216
+  maxStreamReceiveWindow: 16777216
+  initConnReceiveWindow: 33554432
+  maxConnReceiveWindow: 33554432
+  maxIdleTimeout: 60s
+  keepAlivePeriod: 15s
+  disablePathMTUDiscovery: true
+
 bandwidth:
-  up: 1 gbps
-  down: 1 gbps
+  up: 500 mbps
+  down: 500 mbps
+
+ignoreClientBandwidth: true
+
+speedTest: false
 
 disableUDP: false
+
+udpIdleTimeout: 30s
+
+resolver:
+  type: https
+  https:
+    addr: 1.1.1.1:443
+    timeout: 5s
+    sni: cloudflare-dns.com
+    insecure: false
+
+acl:
+  inline:
+    - reject(geoip:ir)
+    - reject(geosite:category-porn)
+
+outbounds:
+  - name: direct
+    type: direct
+  - name: block
+    type: block
