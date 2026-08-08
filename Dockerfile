@@ -1,6 +1,17 @@
-FROM v2fly/v2fly-core:latest
+FROM alpine:latest
 
-RUN apk add --no-cache supervisor nginx
+RUN apk add --no-cache \
+    curl \
+    wget \
+    supervisor \
+    nginx \
+    unzip
+
+# نصب V2Ray
+RUN wget -O /tmp/v2ray.zip "https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-linux-64.zip" \
+    && unzip /tmp/v2ray.zip -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/v2ray \
+    && rm /tmp/v2ray.zip
 
 RUN mkdir -p /var/log/supervisor /run/nginx /etc/v2ray /etc/nginx/http.d
 
