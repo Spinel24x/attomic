@@ -9,19 +9,20 @@ RUN apt-get update && apt-get install -y \
     openjdk-17-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
-# نصب I2P به صورت headless (بدون GUI)
+# دانلود i2p از قبل extracted
 RUN wget https://github.com/i2p/i2p.i2p/releases/download/i2p-2.4.0/i2pinstall_2.4.0.jar \
-    && echo -e "0\n1\n\n\n\n" | java -jar i2pinstall_2.4.0.jar -console \
-    && rm i2pinstall_2.4.0.jar
+    && mkdir -p /tmp/i2p \
+    && cd /tmp/i2p \
+    && jar xf /i2pinstall_2.4.0.jar \
+    && mv /tmp/i2p/i2p /i2p \
+    && chmod +x /i2p/i2prouter \
+    && rm /i2pinstall_2.4.0.jar \
+    && rm -rf /tmp/i2p
 
-# تنظیمات I2P برای console mode
-RUN echo "i2p.dir.base=/i2p" > /i2p/clients.config \
-    && echo "i2p.dir.config=/i2p" >> /i2p/clients.config
-
-RUN mkdir -p /var/log/supervisor
+RUN mkdir -p /var/log/supervisor /i2p
 
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 4444 4445 7657 7070
+EXPOSE 4444 4445 7657
 
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
