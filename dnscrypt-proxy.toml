@@ -1,9 +1,16 @@
+cat > dnscrypt-proxy.toml << 'EOF'
 listen_addresses = ['127.0.0.1:53']
 force_tcp = true
 
 server_names = ['cloudflare']
 
-[static.'cloudflare']
-stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGZsYXJlLmNvbQovZG5zLXF1ZXJ5'
+[static]
+  [static.'cloudflare']
+  stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGZsYXJlLmNvbQovZG5zLXF1ZXJ5'
 
 log_level = 2
+EOF
+
+git add dnscrypt-proxy.toml
+git commit -m "fix: log_level outside static block"
+git push
