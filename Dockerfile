@@ -1,14 +1,23 @@
-FROM alpine:edge
+FROM alpine:latest
 
 RUN apk add --no-cache \
+    curl \
     supervisor \
     nginx \
-    naiveproxy \
-    curl
+    ca-certificates \
+    tar \
+    xz
 
-RUN mkdir -p /var/log/supervisor /run/nginx /etc/naiveproxy
+# دانلود آخرین نسخه NaiveProxy
+RUN curl -sL "https://api.github.com/repos/klzgrad/naiveproxy/releases/latest" | grep "browser_download_url.*linux-x64.tar.xz" | cut -d '"' -f 4 | xargs curl -L -o /tmp/naive.tar.xz \
+    && tar -xJf /tmp/naive.tar.xz -C /tmp \
+    && mv /tmp/naiveproxy-*/naive /usr/local/bin/ \
+    && chmod +x /usr/local/bin/naive \
+    && rm -rf /tmp/naive*
 
-COPY config.json /etc/naiveproxy/config.json
+RUN mkdir -p /var/log/supervisor /run/nginx
+
+COPY config.json /etc/naive/config.json
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
