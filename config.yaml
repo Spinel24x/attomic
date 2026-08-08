@@ -1,4 +1,3 @@
-cat > config.yaml << 'EOF'
 server: :443
 
 tls:
@@ -43,8 +42,3 @@ resolver:
     timeout: 5s
     sni: cloudflare-dns.com
     insecure: false
-EOF
-
-git add config.yaml
-git commit -m "fix: remove unsupported outbounds and acl from server config"
-git push
