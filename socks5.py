@@ -3,53 +3,66 @@
 import os
 import socket
 import struct
-import select
 import threading
 import logging
+import time
 
 
 # ============================================================
-# Configuration
+# CONFIG
 # ============================================================
 
 HOST = "0.0.0.0"
 
-# Railway provides PORT automatically.
-PORT = int(os.environ.get("PORT", "8080"))
+# Railway normally provides PORT.
+# If PORT is not present, use 53 for your current setup.
+PORT = int(os.environ.get("PORT", "53"))
 
-# Optional SOCKS5 authentication.
-# If these variables are not set, authentication is disabled.
+BUFFER_SIZE = 128 * 1024
+
+CONNECT_TIMEOUT = 20
+
+SOCKET_TIMEOUT = 60
+
+# Optional authentication.
+# Leave unset for no authentication.
 USERNAME = os.environ.get("SOCKS5_USERNAME")
 PASSWORD = os.environ.get("SOCKS5_PASSWORD")
 
-BUFFER_SIZE = 64 * 1024
-
-# Connection establishment timeout.
-CONNECT_TIMEOUT = 20
-
-# Idle relay timeout.
-RELAY_TIMEOUT = 300
-
 
 # ============================================================
-# Logging
+# LOGGING
 # ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
 logger = logging.getLogger("socks5")
 
 
 # ============================================================
-# SOCKS5 Reply Codes
+# SOCKS5 CONSTANTS
 # ============================================================
 
-REP_SUCCEEDED = 0x00
+SOCKS_VERSION = 5
+
+NO_AUTH = 0x00
+USERPASS_AUTH = 0x02
+NO_ACCEPTABLE_AUTH = 0xFF
+
+CMD_CONNECT = 0x01
+CMD_BIND = 0x02
+CMD_UDP_ASSOCIATE = 0x03
+
+ATYP_IPV4 = 0x01
+ATYP_DOMAIN = 0x03
+ATYP_IPV6 = 0x04
+
+REP_SUCCESS = 0x00
 REP_GENERAL_FAILURE = 0x01
-REP_CONNECTION_NOT_ALLOWED = 0x02
+REP_NOT_ALLOWED = 0x02
 REP_NETWORK_UNREACHABLE = 0x03
 REP_HOST_UNREACHABLE = 0x04
 REP_CONNECTION_REFUSED = 0x05
@@ -59,13 +72,56 @@ REP_ADDRESS_TYPE_NOT_SUPPORTED = 0x08
 
 
 # ============================================================
-# Helper Functions
+# SOCKET TUNING
+# ============================================================
+
+def tune_socket(sock):
+    """
+    Tune TCP sockets for long-lived proxy traffic.
+    """
+
+    try:
+        sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_KEEPALIVE,
+            1
+        )
+    except Exception:
+        pass
+
+    try:
+        sock.setsockopt(
+            socket.IPPROTO_TCP,
+            socket.TCP_NODELAY,
+            1
+        )
+    except Exception:
+        pass
+
+    try:
+        sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_RCVBUF,
+            1024 * 1024
+        )
+    except Exception:
+        pass
+
+    try:
+        sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_SNDBUF,
+            1024 * 1024
+        )
+    except Exception:
+        pass
+
+
+# ============================================================
+# RECEIVE EXACTLY N BYTES
 # ============================================================
 
 def recv_exact(sock, size):
-    """
-    Receive exactly 'size' bytes.
-    """
 
     data = bytearray()
 
@@ -77,7 +133,7 @@ def recv_exact(sock, size):
 
         if not chunk:
             raise ConnectionError(
-                "Connection closed while receiving data"
+                "Peer closed connection"
             )
 
         data.extend(chunk)
@@ -85,47 +141,34 @@ def recv_exact(sock, size):
     return bytes(data)
 
 
-def send_reply(client, reply_code):
-    """
-    Send a SOCKS5 reply using IPv4 0.0.0.0:0.
-    """
+# ============================================================
+# SOCKS5 REPLY
+# ============================================================
+
+def send_reply(client, code):
+
+    # Reply address is 0.0.0.0:0.
+    #
+    # For CONNECT this is valid because the client does not
+    # require the proxy's bound address for normal operation.
 
     response = (
         b"\x05"
-        + bytes([reply_code])
+        + bytes([code])
         + b"\x00"
         + b"\x01"
         + socket.inet_aton("0.0.0.0")
         + struct.pack(">H", 0)
     )
 
-    try:
-        client.sendall(response)
-    except Exception:
-        pass
-
-
-def recv_socks5_string(sock):
-    """
-    Read SOCKS5 username/password string.
-    """
-
-    length = recv_exact(sock, 1)[0]
-
-    if length == 0:
-        return b""
-
-    return recv_exact(
-        sock,
-        length
-    )
+    client.sendall(response)
 
 
 # ============================================================
-# SOCKS5 Authentication
+# AUTHENTICATION
 # ============================================================
 
-def authenticate(client):
+def negotiate_auth(client):
 
     header = recv_exact(
         client,
@@ -135,47 +178,37 @@ def authenticate(client):
     version = header[0]
     method_count = header[1]
 
-    if version != 5:
+    if version != SOCKS_VERSION:
 
         raise ConnectionError(
-            "Invalid SOCKS version"
+            f"Invalid SOCKS version: {version}"
         )
-
-    if method_count == 0:
-
-        client.sendall(
-            b"\x05\xff"
-        )
-
-        return False
 
     methods = recv_exact(
         client,
         method_count
     )
 
-    auth_required = (
+    authentication_enabled = (
         USERNAME is not None
         and PASSWORD is not None
     )
 
     # --------------------------------------------------------
-    # Username/password authentication
+    # Username / Password
     # --------------------------------------------------------
 
-    if auth_required:
+    if authentication_enabled:
 
-        if 0x02 not in methods:
+        if USERPASS_AUTH not in methods:
 
             client.sendall(
                 b"\x05\xff"
             )
 
-            logger.warning(
-                "Client does not support username/password authentication"
+            raise ConnectionError(
+                "Client does not support username/password"
             )
-
-            return False
 
         client.sendall(
             b"\x05\x02"
@@ -188,18 +221,28 @@ def authenticate(client):
 
         if auth_version != 1:
 
-            logger.warning(
-                "Invalid authentication version"
+            raise ConnectionError(
+                "Invalid username/password auth version"
             )
 
-            return False
+        username_length = recv_exact(
+            client,
+            1
+        )[0]
 
-        username_raw = recv_socks5_string(
-            client
+        username_raw = recv_exact(
+            client,
+            username_length
         )
 
-        password_raw = recv_socks5_string(
-            client
+        password_length = recv_exact(
+            client,
+            1
+        )[0]
+
+        password_raw = recv_exact(
+            client,
+            password_length
         )
 
         username = username_raw.decode(
@@ -222,43 +265,37 @@ def authenticate(client):
                 b"\x01\x01"
             )
 
-            logger.warning(
-                "SOCKS5 authentication failed"
+            raise ConnectionError(
+                "Invalid username/password"
             )
-
-            return False
 
         client.sendall(
             b"\x01\x00"
         )
 
-        return True
+        return
 
     # --------------------------------------------------------
     # No authentication
     # --------------------------------------------------------
 
-    if 0x00 not in methods:
+    if NO_AUTH not in methods:
 
         client.sendall(
             b"\x05\xff"
         )
 
-        logger.warning(
+        raise ConnectionError(
             "Client does not support no-authentication"
         )
-
-        return False
 
     client.sendall(
         b"\x05\x00"
     )
 
-    return True
-
 
 # ============================================================
-# SOCKS5 Request Parser
+# PARSE SOCKS5 REQUEST
 # ============================================================
 
 def parse_request(client):
@@ -273,7 +310,7 @@ def parse_request(client):
     reserved = header[2]
     address_type = header[3]
 
-    if version != 5:
+    if version != SOCKS_VERSION:
 
         send_reply(
             client,
@@ -285,10 +322,23 @@ def parse_request(client):
         )
 
     # --------------------------------------------------------
-    # Only CONNECT is supported
+    # CONNECT
     # --------------------------------------------------------
 
-    if command != 0x01:
+    if command != CMD_CONNECT:
+
+        if command == CMD_UDP_ASSOCIATE:
+
+            logger.warning(
+                "UDP ASSOCIATE requested; UDP proxying is not enabled"
+            )
+
+        else:
+
+            logger.warning(
+                "Unsupported SOCKS5 command: %s",
+                command
+            )
 
         send_reply(
             client,
@@ -303,31 +353,31 @@ def parse_request(client):
     # IPv4
     # --------------------------------------------------------
 
-    if address_type == 0x01:
+    if address_type == ATYP_IPV4:
 
-        raw_address = recv_exact(
+        raw = recv_exact(
             client,
             4
         )
 
         address = socket.inet_ntoa(
-            raw_address
+            raw
         )
 
         address_type_name = "IPv4"
 
     # --------------------------------------------------------
-    # Domain name
+    # DOMAIN
     # --------------------------------------------------------
 
-    elif address_type == 0x03:
+    elif address_type == ATYP_DOMAIN:
 
-        domain_length = recv_exact(
+        length = recv_exact(
             client,
             1
         )[0]
 
-        if domain_length == 0:
+        if length == 0:
 
             send_reply(
                 client,
@@ -335,22 +385,24 @@ def parse_request(client):
             )
 
             raise ConnectionError(
-                "Empty domain name"
+                "Empty domain"
             )
 
-        raw_address = recv_exact(
+        raw = recv_exact(
             client,
-            domain_length
+            length
         )
 
-        # SOCKS5 domain names are transmitted as raw domain
-        # name bytes. ASCII is the normal case.
+        # Do NOT use:
         #
-        # errors='replace' is used instead of IDNA with
-        # errors='ignore', because Python's IDNA codec does
-        # not support the 'ignore' error handler.
+        # decode("idna", errors="ignore")
+        #
+        # Python's IDNA codec does not support that
+        # error handler.
+        #
+        # SOCKS5 normally sends the domain as ASCII.
 
-        address = raw_address.decode(
+        address = raw.decode(
             "ascii",
             errors="replace"
         )
@@ -361,22 +413,22 @@ def parse_request(client):
     # IPv6
     # --------------------------------------------------------
 
-    elif address_type == 0x04:
+    elif address_type == ATYP_IPV6:
 
-        raw_address = recv_exact(
+        raw = recv_exact(
             client,
             16
         )
 
         address = socket.inet_ntop(
             socket.AF_INET6,
-            raw_address
+            raw
         )
 
-        address_type_name = "IPv6"
-
-        # Railway environment currently has no usable IPv6
-        # outbound route for this service.
+        logger.warning(
+            "IPv6 destination requested: %s",
+            address
+        )
 
         send_reply(
             client,
@@ -384,12 +436,8 @@ def parse_request(client):
         )
 
         raise ConnectionError(
-            f"IPv6 destination rejected: {address}"
+            f"IPv6 outbound unavailable: {address}"
         )
-
-    # --------------------------------------------------------
-    # Unsupported address type
-    # --------------------------------------------------------
 
     else:
 
@@ -403,7 +451,7 @@ def parse_request(client):
         )
 
     # --------------------------------------------------------
-    # Destination port
+    # PORT
     # --------------------------------------------------------
 
     raw_port = recv_exact(
@@ -424,11 +472,11 @@ def parse_request(client):
         )
 
         raise ConnectionError(
-            "Invalid destination port: 0"
+            "Destination port is zero"
         )
 
     logger.info(
-        "SOCKS request: %s %s:%s",
+        "SOCKS request: %s %s:%d",
         address_type_name,
         address,
         port
@@ -438,80 +486,74 @@ def parse_request(client):
 
 
 # ============================================================
-# IPv4 Outbound Connection
+# CONNECT USING IPV4 ONLY
 # ============================================================
 
-def create_remote(address, port):
-
-    last_error = None
+def connect_ipv4(host, port):
 
     try:
 
-        # IMPORTANT:
-        #
-        # AF_INET forces IPv4 DNS resolution.
-        #
-        # This prevents Railway from selecting IPv6 addresses
-        # such as:
-        #
-        # 2a03:2880:...
-        #
-        # which previously produced:
-        #
-        # [Errno 101] Network unreachable
-        #
-
-        addr_info = socket.getaddrinfo(
-            address,
+        results = socket.getaddrinfo(
+            host,
             port,
             socket.AF_INET,
-            socket.SOCK_STREAM
+            socket.SOCK_STREAM,
+            0,
+            socket.AI_ADDRCONFIG
         )
 
-    except socket.gaierror as exc:
+    except socket.gaierror:
 
-        raise ConnectionError(
-            f"IPv4 DNS resolution failed for {address}: {exc}"
-        )
+        # Some environments behave better without
+        # AI_ADDRCONFIG.
 
-    if not addr_info:
+        try:
 
-        raise ConnectionError(
-            f"No IPv4 address found for {address}"
-        )
-
-    # Remove duplicate addresses while preserving order.
-
-    candidates = []
-
-    seen = set()
-
-    for item in addr_info:
-
-        sockaddr = item[4]
-
-        if sockaddr not in seen:
-
-            seen.add(
-                sockaddr
+            results = socket.getaddrinfo(
+                host,
+                port,
+                socket.AF_INET,
+                socket.SOCK_STREAM
             )
 
-            candidates.append(
-                item
+        except socket.gaierror as exc:
+
+            raise ConnectionError(
+                f"IPv4 DNS resolution failed: {exc}"
             )
 
-    for (
-        family,
-        socktype,
-        proto,
-        _,
-        sockaddr
-    ) in candidates:
+    if not results:
+
+        raise ConnectionError(
+            f"No IPv4 address for {host}"
+        )
+
+    last_error = None
+
+    tried = set()
+
+    for result in results:
+
+        family = result[0]
+        socktype = result[1]
+        proto = result[2]
+        sockaddr = result[4]
+
+        if sockaddr in tried:
+            continue
+
+        tried.add(
+            sockaddr
+        )
 
         remote = socket.socket(
             family,
             socktype,
             proto
+        )
+
+        tune_socket(
+            remote
         )
 
         remote.settimeout(
@@ -521,7 +563,7 @@ def create_remote(address, port):
         try:
 
             logger.info(
-                "Trying IPv4 connection to %s:%s",
+                "Trying IPv4 connection to %s:%d",
                 sockaddr[0],
                 sockaddr[1]
             )
@@ -535,147 +577,263 @@ def create_remote(address, port):
             )
 
             logger.info(
-                "Connected to %s:%s via IPv4",
-                address,
+                "Connected to %s:%d via IPv4",
+                host,
                 port
             )
 
             return remote
 
-        except socket.timeout as exc:
+        except Exception as exc:
 
             last_error = exc
 
             logger.warning(
-                "IPv4 connection timeout to %s:%s",
-                sockaddr[0],
-                sockaddr[1]
-            )
-
-        except OSError as exc:
-
-            last_error = exc
-
-            logger.warning(
-                "IPv4 connection failed to %s:%s: %s",
+                "IPv4 connection failed to %s:%d: %s",
                 sockaddr[0],
                 sockaddr[1],
                 exc
             )
 
-        finally:
-
-            if last_error is not None:
-
-                try:
-                    remote.close()
-                except Exception:
-                    pass
+            try:
+                remote.close()
+            except Exception:
+                pass
 
     raise ConnectionError(
-        "Could not connect to destination via IPv4: "
-        + str(last_error)
+        f"Could not connect to {host}:{port}: {last_error}"
     )
 
 
 # ============================================================
-# Data Relay
+# ONE-WAY RELAY
 # ============================================================
 
-def relay(client, remote):
+def relay_direction(
+    source,
+    destination,
+    direction_name,
+    counter,
+    stop_event
+):
 
-    sockets = [
-        client,
-        remote
-    ]
+    total = 0
 
-    while True:
+    try:
 
-        try:
-
-            readable, _, exceptional = select.select(
-                sockets,
-                [],
-                sockets,
-                RELAY_TIMEOUT
-            )
-
-        except Exception as exc:
-
-            logger.warning(
-                "Relay select error: %s",
-                exc
-            )
-
-            return
-
-        if exceptional:
-
-            logger.info(
-                "Relay socket exception"
-            )
-
-            return
-
-        if not readable:
-
-            logger.info(
-                "Relay idle timeout"
-            )
-
-            return
-
-        for sock in readable:
+        while not stop_event.is_set():
 
             try:
 
-                data = sock.recv(
+                data = source.recv(
                     BUFFER_SIZE
                 )
 
             except socket.timeout:
 
-                return
+                continue
+
+            except (ConnectionResetError, BrokenPipeError):
+
+                break
 
             except OSError as exc:
 
                 logger.warning(
-                    "Relay receive error: %s",
+                    "Relay %s receive error: %s",
+                    direction_name,
                     exc
                 )
 
-                return
+                break
 
             if not data:
 
-                return
+                break
 
             try:
 
-                if sock is client:
+                destination.sendall(
+                    data
+                )
 
-                    remote.sendall(
-                        data
-                    )
+            except (
+                ConnectionResetError,
+                BrokenPipeError
+            ):
 
-                else:
-
-                    client.sendall(
-                        data
-                    )
+                break
 
             except OSError as exc:
 
                 logger.warning(
-                    "Relay send error: %s",
+                    "Relay %s send error: %s",
+                    direction_name,
                     exc
                 )
 
-                return
+                break
+
+            total += len(data)
+
+            counter["bytes"] = total
+
+            # Log the first data packet immediately.
+            if total == len(data):
+
+                logger.info(
+                    "Relay %s started: %d bytes",
+                    direction_name,
+                    len(data)
+                )
+
+    except Exception as exc:
+
+        logger.warning(
+            "Relay %s unexpected error: %s",
+            direction_name,
+            exc
+        )
+
+    finally:
+
+        stop_event.set()
+
+        logger.info(
+            "Relay %s stopped: %d bytes transferred",
+            direction_name,
+            total
+        )
 
 
 # ============================================================
-# Client Handler
+# BIDIRECTIONAL TCP RELAY
+# ============================================================
+
+def relay(client, remote):
+
+    stop_event = threading.Event()
+
+    client_counter = {
+        "bytes": 0
+    }
+
+    remote_counter = {
+        "bytes": 0
+    }
+
+    # --------------------------------------------------------
+    # Do NOT use aggressive socket timeouts here.
+    #
+    # A SOCKS tunnel can legitimately remain idle.
+    # --------------------------------------------------------
+
+    client.settimeout(
+        None
+    )
+
+    remote.settimeout(
+        None
+    )
+
+    tune_socket(
+        client
+    )
+
+    tune_socket(
+        remote
+    )
+
+    t1 = threading.Thread(
+        target=relay_direction,
+        args=(
+            client,
+            remote,
+            "CLIENT -> REMOTE",
+            client_counter,
+            stop_event
+        ),
+        daemon=True
+    )
+
+    t2 = threading.Thread(
+        target=relay_direction,
+        args=(
+            remote,
+            client,
+            "REMOTE -> CLIENT",
+            remote_counter,
+            stop_event
+        ),
+        daemon=True
+    )
+
+    start = time.monotonic()
+
+    t1.start()
+    t2.start()
+
+    # --------------------------------------------------------
+    # Keep relay alive until one side terminates.
+    # --------------------------------------------------------
+
+    while not stop_event.wait(
+        1
+    ):
+
+        # Log transfer statistics every ~10 seconds.
+
+        elapsed = time.monotonic() - start
+
+        if (
+            int(elapsed) > 0
+            and
+            int(elapsed) % 10 == 0
+        ):
+
+            logger.info(
+                "Traffic stats: client->remote=%d bytes, "
+                "remote->client=%d bytes",
+                client_counter["bytes"],
+                remote_counter["bytes"]
+            )
+
+    # --------------------------------------------------------
+    # Shutdown both directions.
+    # --------------------------------------------------------
+
+    try:
+        client.shutdown(
+            socket.SHUT_RDWR
+        )
+    except Exception:
+        pass
+
+    try:
+        remote.shutdown(
+            socket.SHUT_RDWR
+        )
+    except Exception:
+        pass
+
+    t1.join(
+        timeout=2
+    )
+
+    t2.join(
+        timeout=2
+    )
+
+    logger.info(
+        "Tunnel finished: client->remote=%d bytes, "
+        "remote->client=%d bytes",
+        client_counter["bytes"],
+        remote_counter["bytes"]
+    )
+
+
+# ============================================================
+# CLIENT HANDLER
 # ============================================================
 
 def handle_client(
@@ -690,34 +848,30 @@ def handle_client(
 
     try:
 
-        client.settimeout(
-            CONNECT_TIMEOUT
+        tune_socket(
+            client
         )
 
         logger.info(
-            "Client connected: %s:%s",
+            "Client connected: %s:%d",
             client_ip,
             client_port
         )
 
         # ----------------------------------------------------
-        # SOCKS5 authentication
+        # SOCKS negotiation
         # ----------------------------------------------------
 
-        if not authenticate(
+        client.settimeout(
+            CONNECT_TIMEOUT
+        )
+
+        negotiate_auth(
             client
-        ):
-
-            logger.warning(
-                "SOCKS5 negotiation rejected: %s:%s",
-                client_ip,
-                client_port
-            )
-
-            return
+        )
 
         # ----------------------------------------------------
-        # SOCKS5 CONNECT request
+        # Request
         # ----------------------------------------------------
 
         destination, port = parse_request(
@@ -725,7 +879,7 @@ def handle_client(
         )
 
         logger.info(
-            "CONNECT %s:%s from %s:%s",
+            "CONNECT %s:%d from %s:%d",
             destination,
             port,
             client_ip,
@@ -733,72 +887,86 @@ def handle_client(
         )
 
         # ----------------------------------------------------
-        # Connect to destination using IPv4
+        # Remote connection
         # ----------------------------------------------------
 
         try:
 
-            remote = create_remote(
+            remote = connect_ipv4(
                 destination,
                 port
             )
 
         except ConnectionError as exc:
 
-            error_text = str(
+            text = str(
                 exc
             ).lower()
 
-            if (
-                "timeout" in error_text
-            ):
+            if "refused" in text:
 
-                reply = REP_TTL_EXPIRED
+                code = REP_CONNECTION_REFUSED
 
-            elif (
-                "refused" in error_text
-            ):
+            elif "network unreachable" in text:
 
-                reply = REP_CONNECTION_REFUSED
+                code = REP_NETWORK_UNREACHABLE
 
-            elif (
-                "network unreachable" in error_text
-            ):
+            elif "host" in text:
 
-                reply = REP_NETWORK_UNREACHABLE
+                code = REP_HOST_UNREACHABLE
 
-            elif (
-                "host" in error_text
-            ):
+            elif "timeout" in text:
 
-                reply = REP_HOST_UNREACHABLE
+                code = REP_TTL_EXPIRED
 
             else:
 
-                reply = REP_GENERAL_FAILURE
+                code = REP_GENERAL_FAILURE
 
-            send_reply(
-                client,
-                reply
-            )
+            try:
+
+                send_reply(
+                    client,
+                    code
+                )
+
+            except Exception:
+                pass
 
             raise
 
         # ----------------------------------------------------
-        # SOCKS5 success
+        # SUCCESS
         # ----------------------------------------------------
 
         send_reply(
             client,
-            REP_SUCCEEDED
+            REP_SUCCESS
         )
+
+        logger.info(
+            "SOCKS5 CONNECT established: %s:%d",
+            destination,
+            port
+        )
+
+        # ----------------------------------------------------
+        # IMPORTANT:
+        #
+        # The handshake timeout must NOT remain active during
+        # the actual tunnel.
+        # ----------------------------------------------------
 
         client.settimeout(
             None
         )
 
+        remote.settimeout(
+            None
+        )
+
         # ----------------------------------------------------
-        # Start bidirectional relay
+        # Relay
         # ----------------------------------------------------
 
         relay(
@@ -806,21 +974,13 @@ def handle_client(
             remote
         )
 
-    except ConnectionError as exc:
+    except Exception as exc:
 
         logger.warning(
-            "Connection error from %s:%s: %s",
+            "Connection error from %s:%d: %s",
             client_ip,
             client_port,
             exc
-        )
-
-    except Exception as exc:
-
-        logger.exception(
-            "Unexpected error from %s:%s: %s",
-            client_ip,
-            client_port
         )
 
     finally:
@@ -838,14 +998,14 @@ def handle_client(
                 pass
 
         logger.info(
-            "Connection closed: %s:%s",
+            "Connection closed: %s:%d",
             client_ip,
             client_port
         )
 
 
 # ============================================================
-# Server
+# SERVER
 # ============================================================
 
 def main():
@@ -861,6 +1021,17 @@ def main():
         1
     )
 
+    try:
+
+        server.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_KEEPALIVE,
+            1
+        )
+
+    except Exception:
+        pass
+
     server.bind(
         (
             HOST,
@@ -869,11 +1040,11 @@ def main():
     )
 
     server.listen(
-        256
+        512
     )
 
     logger.info(
-        "SOCKS5 server listening on %s:%s",
+        "SOCKS5 server listening on %s:%d",
         HOST,
         PORT
     )
@@ -885,7 +1056,7 @@ def main():
             client, address = server.accept()
 
             logger.info(
-                "TCP connection accepted from %s:%s",
+                "TCP connection accepted from %s:%d",
                 address[0],
                 address[1]
             )
@@ -903,27 +1074,20 @@ def main():
 
         except KeyboardInterrupt:
 
-            logger.info(
-                "Server shutting down"
-            )
-
             break
 
         except Exception as exc:
 
             logger.exception(
-                "Accept loop error: %s",
+                "Accept error: %s",
                 exc
             )
 
-    try:
-        server.close()
-    except Exception:
-        pass
+    server.close()
 
 
 # ============================================================
-# Entry Point
+# START
 # ============================================================
 
 if __name__ == "__main__":
