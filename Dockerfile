@@ -7,7 +7,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     supervisor \
     dnsutils \
-    nginx-full \
+    nginx \
+    libnginx-mod-stream \
     && rm -rf /var/lib/apt/lists/*
 
 RUN wget https://github.com/DNSCrypt/dnscrypt-proxy/releases/download/2.1.5/dnscrypt-proxy-linux_x86_64-2.1.5.tar.gz \
