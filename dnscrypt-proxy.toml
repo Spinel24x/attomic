@@ -1,5 +1,11 @@
 listen_addresses = ['127.0.0.1:53']
 force_tcp = true
+
+# فقط TCP - UDP غیرفعال
+[listeners]
+  [listeners.local_listener]
+  tcp_only = true
+
 server_names = ['cloudflare']
 
 [static.'cloudflare']
