@@ -1,11 +1,35 @@
+# گوش دادن روی پورت ۵۳ داخلی
 listen_addresses = ['127.0.0.1:53']
 force_tcp = true
+tcp_only = true
 
-server_names = ['cloudflare']
+# سرورهای بالادستی (برای پایداری بیشتر)
+server_names = ['cloudflare', 'google']
 
 [static]
   [static.'cloudflare']
   stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGZsYXJlLmNvbQovZG5zLXF1ZXJ5'
+  
+  [static.'google']
+  stamp = 'sdns://AgUAAAAAAAAABzguOC44LjigHvYkz_9ea9O63fP92_3qVlRn43cpncfuZnUWbzAMwbkgdoAkR6AZkxo0EMYuMQdjLmpvbw'
 
+# کش برای عملکرد بهتر
 cache = true
+cache_size = 2048
+cache_min_ttl = 600
+cache_max_ttl = 86400
+
+# تایم‌اوت مناسب برای TCP Proxy
+timeout = 5000
+keepalive = 30
+
+# DNS بالادستی برای بوت‌استرپ
+bootstrap_resolvers = ['9.9.9.9:53', '8.8.8.8:53']
+
+# لاگ‌گیری
 log_level = 2
+log_file = '/var/log/dnscrypt-proxy.log'
+
+# نادیده گرفتن خطاهای TLS برای عملکرد بهتر
+ignore_system_dns = true
+netprobe_timeout = 60
