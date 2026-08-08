@@ -3,4 +3,4 @@ force_tcp = true
 server_names = ['cloudflare']
 
 [static.'cloudflare']
-stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGFsYXJlLmNvbQovZG5zLXF1ZXJ5'
+stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGZsYXJlLmNvbQovZG5zLXF1ZXJ5'
