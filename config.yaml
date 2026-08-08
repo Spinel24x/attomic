@@ -1,3 +1,4 @@
+cat > config.yaml << 'EOF'
 server: :443
 
 tls:
@@ -13,10 +14,6 @@ masquerade:
   proxy:
     url: https://speed.cloudflare.com
     rewriteHost: true
-
-# این کلید اصلی TCP mode هست
-transport:
-  type: tcp
 
 quic:
   initStreamReceiveWindow: 16777216
@@ -46,14 +43,8 @@ resolver:
     timeout: 5s
     sni: cloudflare-dns.com
     insecure: false
+EOF
 
-acl:
-  inline:
-    - reject(geoip:ir)
-    - reject(geosite:category-porn)
-
-outbounds:
-  - name: direct
-    type: direct
-  - name: block
-    type: block
+git add config.yaml
+git commit -m "fix: remove unsupported outbounds and acl from server config"
+git push
