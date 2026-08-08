@@ -1,26 +1,13 @@
 FROM alpine:latest
 
 RUN apk add --no-cache \
-    curl \
-    wget \
     supervisor \
     nginx \
-    unzip
+    curl
 
-RUN wget -O /tmp/v2ray.zip "https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-linux-64.zip" \
-    && unzip /tmp/v2ray.zip -d /usr/local/bin/ \
-    && chmod +x /usr/local/bin/v2ray \
-    && rm /tmp/v2ray.zip
+RUN mkdir -p /var/log/supervisor /run/nginx /etc/nginx/http.d
 
-RUN mkdir -p /var/log/supervisor /run/nginx /etc/v2ray /etc/nginx/http.d
-
-RUN echo '{"inbounds":[{"port":10000,"listen":"127.0.0.1","protocol":"vmess","settings":{"clients":[{"id":"attomic-uuid-2026","alterId":0}]},"streamSettings":{"network":"ws","wsSettings":{"path":"/ws"}}}],"outbounds":[{"protocol":"freedom","settings":{}}]}' > /etc/v2ray/config.json
-
-# تست V2Ray
-RUN /usr/local/bin/v2ray run -test -c /etc/v2ray/config.json || true
-RUN /usr/local/bin/v2ray version
-
-RUN echo 'server { listen 443; location /ws { proxy_pass http://127.0.0.1:10000; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; } location / { return 200 "OK"; }}' > /etc/nginx/http.d/default.conf
+RUN echo 'server { listen 443; location / { proxy_pass http://1.1.1.1; proxy_http_version 1.1; proxy_set_header Host $host; } }' > /etc/nginx/http.d/default.conf
 
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
