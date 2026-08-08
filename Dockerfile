@@ -41,7 +41,9 @@ RUN echo "server: :53" > /etc/hysteria/config.yaml \
     && echo "speedTest: false" >> /etc/hysteria/config.yaml \
     && echo "" >> /etc/hysteria/config.yaml \
     && echo "disableUDP: false" >> /etc/hysteria/config.yaml \
-    && cat /etc/hysteria/config.yaml
+    && echo "=== CONFIG ===" \
+    && cat /etc/hysteria/config.yaml \
+    && echo "=============="
 
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
