@@ -1,4 +1,4 @@
-server: :443
+server: :53
 
 tls:
   cert: /etc/hysteria/cert.pem
@@ -34,11 +34,3 @@ speedTest: false
 disableUDP: false
 
 udpIdleTimeout: 30s
-
-resolver:
-  type: https
-  https:
-    addr: 1.1.1.1:443
-    timeout: 5s
-    sni: cloudflare-dns.com
-    insecure: false
