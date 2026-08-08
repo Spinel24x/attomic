@@ -2,22 +2,23 @@ FROM alpine:latest
 
 RUN apk add --no-cache \
     curl \
+    wget \
     supervisor \
     nginx \
     ca-certificates \
     tar \
     xz \
-    libstdc++ \
-    jq
+    libstdc++
 
-RUN curl -sL "https://api.github.com/repos/klzgrad/naiveproxy/releases/latest" | jq -r '.assets[] | select(.name | endswith("linux-x64.tar.xz")) | .browser_download_url' | xargs curl -L -o /tmp/naive.tar.xz \
+# لینک مستقیم آخرین نسخه
+RUN wget -O /tmp/naive.tar.xz "https://github.com/klzgrad/naiveproxy/releases/download/v131.0.6778.108-1/naiveproxy-v131.0.6778.108-1-linux-x64.tar.xz" \
     && ls -la /tmp/naive.tar.xz \
-    && file /tmp/naive.tar.xz || true \
     && tar -xJf /tmp/naive.tar.xz -C /tmp \
-    && ls -la /tmp/ \
-    && find /tmp -name "naive" -type f -exec cp {} /usr/local/bin/naive \; \
+    && ls -la /tmp/naiveproxy-v131.0.6778.108-1-linux-x64/ \
+    && cp /tmp/naiveproxy-v131.0.6778.108-1-linux-x64/naive /usr/local/bin/naive \
     && chmod +x /usr/local/bin/naive \
     && ls -la /usr/local/bin/naive \
+    && /usr/local/bin/naive --version \
     && rm -rf /tmp/naive*
 
 RUN mkdir -p /var/log/supervisor /run/nginx
