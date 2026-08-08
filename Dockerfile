@@ -1,14 +1,11 @@
-FROM alpine:latest
+FROM python:3.12-alpine
 
-RUN apk add --no-cache \
-    supervisor \
-    socat \
-    curl
+WORKDIR /app
 
-RUN mkdir -p /var/log/supervisor
+COPY socks5.py /app/socks5.py
 
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+RUN chmod +x /app/socks5.py
 
-EXPOSE 443
+ENV PYTHONUNBUFFERED=1
 
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["python3", "/app/socks5.py"]
