@@ -3,11 +3,13 @@ FROM alpine:latest
 RUN apk add --no-cache \
     supervisor \
     nginx \
-    curl
+    curl \
+    python3
 
-RUN mkdir -p /var/log/supervisor /run/nginx /etc/nginx/http.d
+RUN mkdir -p /var/log/supervisor /run/nginx
 
-RUN echo 'server { listen 443; location / { proxy_pass http://1.1.1.1; proxy_http_version 1.1; proxy_set_header Host $host; } }' > /etc/nginx/http.d/default.conf
+# SOCKS5 Proxy
+COPY socks5.py /socks5.py
 
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
