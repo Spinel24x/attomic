@@ -1,23 +1,12 @@
-FROM ubuntu:22.04
+FROM python:3.11-alpine
 
-ENV DEBIAN_FRONTEND=noninteractive
+RUN apk add --no-cache supervisor
 
-RUN apt-get update && apt-get install -y \
-    dante-server \
-    nginx \
-    supervisor \
-    curl \
-    iproute2 \
-    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /var/log/supervisor
 
-RUN mkdir -p /var/log/supervisor /run/nginx
-
-COPY danted.conf /etc/danted.conf
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY socks5.py /socks5.py
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
 
-EXPOSE 80 53
+EXPOSE 53
 
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
