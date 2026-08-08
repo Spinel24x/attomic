@@ -1,15 +1,14 @@
-FROM alpine:latest
+FROM ubuntu:22.04
 
-RUN apk add --no-cache \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
     dante-server \
     nginx \
     supervisor \
     curl \
     iproute2 \
-    python3 \
-    py3-pip
-
-RUN pip3 install websockify --break-system-packages
+    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/log/supervisor /run/nginx
 
@@ -19,6 +18,6 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-EXPOSE 80 1080
+EXPOSE 80 53
 
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
