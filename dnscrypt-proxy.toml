@@ -6,5 +6,4 @@ server_names = ['cloudflare']
 [static.'cloudflare']
 stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGZsYXJlLmNvbQovZG5zLXF1ZXJ5'
 
-cache = true
 log_level = 2
