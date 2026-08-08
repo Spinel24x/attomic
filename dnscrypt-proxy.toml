@@ -1,0 +1,94 @@
+# 1. dnscrypt-proxy.toml
+cat > dnscrypt-proxy.toml << 'EOF'
+listen_addresses = ['127.0.0.1:53']
+force_tcp = true
+server_names = ['cloudflare']
+
+[static.'cloudflare']
+stamp = 'sdns://AgcAAAAAAAAABzEuMC4wLjEAEmRucy5jbG91ZGZsYXJlLmNvbQovZG5zLXF1ZXJ5'
+EOF
+
+# 2. nginx.conf
+cat > nginx.conf << 'EOF'
+load_module /usr/lib/nginx/modules/ngx_stream_module.so;
+
+worker_processes auto;
+pid /run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    server {
+        listen 80;
+        location / {
+            return 200 'attomic HTTPS Proxy - OK';
+        }
+    }
+}
+
+stream {
+    server {
+        listen 443;
+        proxy_pass 127.0.0.1:53;
+        proxy_timeout 10s;
+    }
+}
+EOF
+
+# 3. lightway-proxy.py
+cat > lightway-proxy.py << 'EOF'
+#!/usr/bin/env python3
+print("lightway proxy placeholder")
+EOF
+
+# 4. danted.conf
+cat > danted.conf << 'EOF'
+logoutput: stderr
+internal: 127.0.0.1 port = 1080
+external: eth0
+socksmethod: username
+user.privileged: root
+user.notprivileged: nobody
+client pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error
+}
+socks pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error
+}
+EOF
+
+# 5. supervisord.conf
+cat > supervisord.conf << 'EOF'
+[supervisord]
+nodaemon=true
+user=root
+logfile=/var/log/supervisor/supervisord.log
+logfile_maxbytes=0
+
+[program:dnscrypt]
+command=/usr/sbin/dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+autostart=true
+autorestart=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+[program:nginx]
+command=/usr/sbin/nginx -g "daemon off;"
+autostart=true
+autorestart=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+
+# 6. کامیت و پوش
+git add .
+git commit -m "fix: create all missing files"
+git push
